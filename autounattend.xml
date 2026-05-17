@@ -796,6 +796,14 @@ $packages = @(
     'Microsoft.Windows.Ai.Copilot.Provider'
     'Microsoft.Copilot_8wekyb3d8bbwe'
     'Microsoft.Office.OneNote'
+    'MicrosoftWindows.Client.WebExperience'
+    'Microsoft.SecHealthUI'
+    'Microsoft.StorePurchaseApp'
+    'Microsoft.MicrosoftEdgeDevToolsClient'
+    'MicrosoftWindows.CrossDevice'
+    'Microsoft.RemoteDesktop'
+    'Microsoft.PPIProjection'
+    'Microsoft.AsyncTextService'
 )
 
 $capabilities = @(
@@ -804,6 +812,12 @@ $capabilities = @(
     'App.StepsRecorder'
     'Microsoft.Windows.WordPad'
     'Microsoft.Windows.MSPaint'
+    'Browser.InternetExplorer'
+    'MathRecognizer'
+    'Media.WindowsMediaPlayer'
+    'XPS.Viewer'
+    'Print.Fax.Scan'
+    'Hello.Face'
 )
 
 $optionalFeatures = @(
@@ -2681,7 +2695,128 @@ Windows Registry Editor Version 5.00
     # ============================================================================
 
     # Start here
+    Write-Log "=== CUSTOM HARDENING (Defender / Store / Edge / Widgets / Privacy) START ===" "INFO"
 
+    # --- Windows Defender: full disable ---
+    # Tamper Protection must be cleared first, otherwise DisableAntiSpyware is silently ignored.
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Features' -Name 'TamperProtection' -Type 'DWord' -Value 0 -Description 'Clear Tamper Protection before disabling Defender'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender' -Name 'DisableAntiSpyware' -Type 'DWord' -Value 1 -Description 'Disable Defender anti-spyware'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender' -Name 'DisableAntiVirus' -Type 'DWord' -Value 1 -Description 'Disable Defender antivirus'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender' -Name 'DisableRoutinelyTakingAction' -Type 'DWord' -Value 1 -Description 'Stop Defender from taking automatic action'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender' -Name 'ServiceKeepAlive' -Type 'DWord' -Value 0 -Description 'Do not keep Defender service alive'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableRealtimeMonitoring' -Type 'DWord' -Value 1 -Description 'Disable real-time monitoring'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableBehaviorMonitoring' -Type 'DWord' -Value 1 -Description 'Disable behavior monitoring'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableOnAccessProtection' -Type 'DWord' -Value 1 -Description 'Disable on-access protection'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableScanOnRealtimeEnable' -Type 'DWord' -Value 1 -Description 'Disable scan on real-time enable'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection' -Name 'DisableIOAVProtection' -Type 'DWord' -Value 1 -Description 'Disable download scanning'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet' -Name 'SpyNetReporting' -Type 'DWord' -Value 0 -Description 'Disable MAPS cloud reporting'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet' -Name 'SubmitSamplesConsent' -Type 'DWord' -Value 2 -Description 'Never submit samples to Microsoft'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Reporting' -Name 'DisableEnhancedNotifications' -Type 'DWord' -Value 1 -Description 'Suppress enhanced Defender notifications'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Signature Updates' -Name 'ForceUpdateFromMU' -Type 'DWord' -Value 0 -Description 'Do not force signature updates'
+
+    # Defender services off (works during specialize before Defender locks them)
+    'WinDefend','WdNisSvc','Sense','SecurityHealthService','MDCoreSvc' | ForEach-Object {
+        Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$_" -Name 'Start' -Type 'DWord' -Value 4 -Description "Disable Defender service: $_"
+    }
+    # Kernel-mode filter drivers: manual only (Start=4 can cause boot loop)
+    'WdNisDrv','WdFilter','WdBoot' | ForEach-Object {
+        Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$_" -Name 'Start' -Type 'DWord' -Value 3 -Description "Set Defender driver to manual: $_"
+    }
+
+    # Defender scheduled tasks
+    $defenderTasks = @(
+        '\Microsoft\Windows\Windows Defender\Windows Defender Cache Maintenance',
+        '\Microsoft\Windows\Windows Defender\Windows Defender Cleanup',
+        '\Microsoft\Windows\Windows Defender\Windows Defender Scheduled Scan',
+        '\Microsoft\Windows\Windows Defender\Windows Defender Verification',
+        '\Microsoft\Windows\ExploitGuard\ExploitGuard MDM policy Refresh'
+    )
+    foreach ($t in $defenderTasks) {
+        $r = & cmd.exe /c "schtasks /Change /TN `"$t`" /Disable" 2>&1
+        if ($LASTEXITCODE -eq 0) { Write-Log "Disabled scheduled task: $t" "SUCCESS" }
+    }
+
+    # SmartScreen off everywhere
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer' -Name 'SmartScreenEnabled' -Type 'String' -Value 'Off' -Description 'Disable SmartScreen for Explorer'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name 'EnableSmartScreen' -Type 'DWord' -Value 0 -Description 'Disable SmartScreen via policy'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name 'ShellSmartScreenLevel' -Type 'String' -Value 'Warn' -Description 'Lower SmartScreen prompt level'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppHost' -Name 'EnableWebContentEvaluation' -Type 'DWord' -Value 0 -Description 'Disable SmartScreen URL reputation lookup'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppHost' -Name 'PreventOverride' -Type 'DWord' -Value 0 -Description 'Allow SmartScreen override (so it cannot block)'
+
+    # --- Microsoft Store: full policy block (AppX is already in removal list) ---
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' -Name 'RemoveWindowsStore' -Type 'DWord' -Value 1 -Description 'Block Microsoft Store from running'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' -Name 'DisableStoreApps' -Type 'DWord' -Value 1 -Description 'Disable all Store apps'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' -Name 'AutoDownload' -Type 'DWord' -Value 2 -Description 'Disable Store auto-update of apps'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore' -Name 'DisableOSUpgrade' -Type 'DWord' -Value 1 -Description 'Block Store-driven OS upgrades'
+    Set-RegistryValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\InstallService' -Name 'Start' -Type 'DWord' -Value 3 -Description 'Set Store Install Service to manual (keeps winget working on-demand, blocks Store auto-push)'
+    Set-RegistryValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\PushToInstall' -Name 'Start' -Type 'DWord' -Value 3 -Description 'Set PushToInstall to manual (blocks cross-device push, keeps on-demand)'
+
+    # --- Edge re-install block (Edge already fully removed by Remove-ChromiumEdge) ---
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\EdgeUpdate' -Name 'DoNotUpdateToEdgeWithChromium' -Type 'DWord' -Value 1 -Description 'Block Edge update mechanism from reinstalling Edge'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate' -Name 'InstallDefault' -Type 'DWord' -Value 0 -Description 'Block default Edge install via policy'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate' -Name 'UpdateDefault' -Type 'DWord' -Value 0 -Description 'Block default Edge update via policy'
+
+    # --- Widgets / online content blocking (system-wide) ---
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\PolicyManager\default\NewsAndInterests\AllowNewsAndInterests' -Name 'value' -Type 'DWord' -Value 0 -Description 'Block Widgets via PolicyManager'
+    Set-RegistryValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\WidgetService' -Name 'Start' -Type 'DWord' -Value 4 -Description 'Disable WidgetService'
+
+    # --- Web/Bing search in Start: stop online callouts ---
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search' -Name 'DisableWebSearch' -Type 'DWord' -Value 1 -Description 'Disable web results in Windows Search'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search' -Name 'ConnectedSearchUseWeb' -Type 'DWord' -Value 0 -Description 'Disable connected web search'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search' -Name 'AllowSearchToUseLocation' -Type 'DWord' -Value 0 -Description 'Block search from using location'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search' -Name 'AllowCloudSearch' -Type 'DWord' -Value 0 -Description 'Disable cloud search'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search' -Name 'AllowSearchHighlights' -Type 'DWord' -Value 0 -Description 'Disable Search Highlights (online content)'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search' -Name 'EnableDynamicContentInWSB' -Type 'DWord' -Value 0 -Description 'Disable dynamic content in search box'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Search' -Name 'CortanaConsent' -Type 'DWord' -Value 0 -Description 'Cortana consent off'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Search' -Name 'BingSearchEnabled' -Type 'DWord' -Value 0 -Description 'Disable Bing in search'
+
+    # --- Cloud content / consumer features / Spotlight ---
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableCloudOptimizedContent' -Type 'DWord' -Value 1 -Description 'Block cloud-optimized content suggestions'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableConsumerAccountStateContent' -Type 'DWord' -Value 1 -Description 'Block consumer account state content'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableWindowsConsumerFeatures' -Type 'DWord' -Value 1 -Description 'Disable consumer features (preinstalled suggested apps)'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableSoftLanding' -Type 'DWord' -Value 1 -Description 'Disable Soft Landing tips'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableTailoredExperiencesWithDiagnosticData' -Type 'DWord' -Value 1 -Description 'Block tailored experiences with diagnostic data'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableWindowsSpotlightFeatures' -Type 'DWord' -Value 1 -Description 'Block Windows Spotlight features'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableWindowsSpotlightOnLockScreen' -Type 'DWord' -Value 1 -Description 'Block Spotlight on lock screen'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableWindowsSpotlightOnSettings' -Type 'DWord' -Value 1 -Description 'Block Spotlight ads in Settings'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableThirdPartySuggestions' -Type 'DWord' -Value 1 -Description 'Disable 3rd-party suggestions'
+
+    # --- Inking / typing / handwriting data collection ---
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization' -Name 'RestrictImplicitInkCollection' -Type 'DWord' -Value 1 -Description 'Restrict implicit ink collection'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization' -Name 'RestrictImplicitTextCollection' -Type 'DWord' -Value 1 -Description 'Restrict implicit text collection'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\InputPersonalization' -Name 'AllowInputPersonalization' -Type 'DWord' -Value 0 -Description 'Disallow input personalization'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\TextInput' -Name 'AllowLinguisticDataCollection' -Type 'DWord' -Value 0 -Description 'Block linguistic data collection'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\HandwritingErrorReports' -Name 'PreventHandwritingErrorReports' -Type 'DWord' -Value 1 -Description 'Block handwriting error reports'
+
+    # --- Find My Device + online speech model updates ---
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\FindMyDevice' -Name 'AllowFindMyDevice' -Type 'DWord' -Value 0 -Description 'Block Find My Device'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Speech' -Name 'AllowSpeechModelUpdate' -Type 'DWord' -Value 0 -Description 'Block online speech model updates'
+
+    # --- NCSI active probe (msftconnecttest.com / dns.msftncsi.com) ---
+    Set-RegistryValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\NlaSvc\Parameters\Internet' -Name 'EnableActiveProbing' -Type 'DWord' -Value 0 -Description 'Disable NCSI active probing'
+    Set-RegistryValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\NetworkConnectivityStatusIndicator' -Name 'NoActiveProbe' -Type 'DWord' -Value 1 -Description 'Block NCSI active probe via policy'
+
+    # --- Tier 2: telemetry / online-callout / cross-device services ---
+    # Disabled outright (no legitimate daily-use case for this user)
+    'dmwappushservice','CDPSvc','OneSyncSvc','MessagingService','RemoteRegistry','TrkWks' | ForEach-Object {
+        Set-RegistryValue -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$_" -Name 'Start' -Type 'DWord' -Value 4 -Description "Disable service: $_"
+    }
+
+    # --- Tier 4: extra telemetry / cosmetic scheduled tasks ---
+    $extraTasks = @(
+        '\Microsoft\Office\OfficeTelemetryAgentLogOn',
+        '\Microsoft\Office\OfficeTelemetryAgentFallBack',
+        '\Microsoft\Windows\AppID\SmartScreenSpecific',
+        '\Microsoft\Windows\Application Experience\PcaPatchDbTask',
+        '\Microsoft\Windows\Application Experience\AitAgent',
+        '\Microsoft\Windows\Maintenance\WinSAT'
+    )
+    foreach ($t in $extraTasks) {
+        $r = & cmd.exe /c "schtasks /Change /TN `"$t`" /Disable" 2>&1
+        if ($LASTEXITCODE -eq 0) { Write-Log "Disabled scheduled task: $t" "SUCCESS" }
+    }
+
+    Write-Log "=== CUSTOM HARDENING COMPLETE ===" "SUCCESS"
     # End here
 
 }
@@ -3108,7 +3243,26 @@ Windows Registry Editor Version 5.00
             # ============================================================================
 
             # Start here
-
+            # --- Custom hardening: per-user search, widgets, suggestions, input personalization ---
+            Set-RegistryValue -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search' -Name 'BingSearchEnabled' -Type 'DWord' -Value 0 -Description 'Disable Bing in user search'
+            Set-RegistryValue -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search' -Name 'CortanaConsent' -Type 'DWord' -Value 0 -Description 'Cortana consent off (user)'
+            Set-RegistryValue -Path 'HKCU:\SOFTWARE\Policies\Microsoft\Windows\Explorer' -Name 'DisableSearchBoxSuggestions' -Type 'DWord' -Value 1 -Description 'Disable web suggestions in taskbar search'
+            Set-RegistryValue -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Feeds' -Name 'ShellFeedsTaskbarViewMode' -Type 'DWord' -Value 2 -Description 'Hide widgets from taskbar'
+            Set-RegistryValue -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Feeds' -Name 'EnableFeeds' -Type 'DWord' -Value 0 -Description 'Disable feeds (user)'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name 'SubscribedContent-310093Enabled' -Type 'DWord' -Value 0 -Description 'Disable Settings welcome suggestions'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name 'SubscribedContent-314559Enabled' -Type 'DWord' -Value 0 -Description 'Disable suggestion content'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name 'SubscribedContent-338387Enabled' -Type 'DWord' -Value 0 -Description 'Disable lockscreen tips'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name 'SubscribedContent-338388Enabled' -Type 'DWord' -Value 0 -Description 'Disable start menu suggestions'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name 'SubscribedContent-338389Enabled' -Type 'DWord' -Value 0 -Description 'Disable get tips and tricks notifications'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name 'SystemPaneSuggestionsEnabled' -Type 'DWord' -Value 0 -Description 'Disable Settings app suggestions'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name 'SilentInstalledAppsEnabled' -Type 'DWord' -Value 0 -Description 'Disable silently installed suggested apps'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name 'OemPreInstalledAppsEnabled' -Type 'DWord' -Value 0 -Description 'Disable OEM preinstalled app suggestions'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -Name 'PreInstalledAppsEnabled' -Type 'DWord' -Value 0 -Description 'Disable preinstalled app suggestions'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Siuf\Rules' -Name 'NumberOfSIUFInPeriod' -Type 'DWord' -Value 0 -Description 'Block feedback request frequency'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\InputPersonalization' -Name 'RestrictImplicitInkCollection' -Type 'DWord' -Value 1 -Description 'User-level ink collection restrict'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\InputPersonalization' -Name 'RestrictImplicitTextCollection' -Type 'DWord' -Value 1 -Description 'User-level text collection restrict'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\InputPersonalization\TrainedDataStore' -Name 'HarvestContacts' -Type 'DWord' -Value 0 -Description 'Stop contact harvesting for input personalization'
+            Set-RegistryValue -Path 'HKCU:\Software\Microsoft\Personalization\Settings' -Name 'AcceptedPrivacyPolicy' -Type 'DWord' -Value 0 -Description 'Reject input personalization privacy policy'
             # End here
 
 
